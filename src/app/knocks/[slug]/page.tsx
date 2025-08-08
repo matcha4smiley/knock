@@ -1,9 +1,14 @@
 // src/app/knocks/[slug]/page.tsx
-export default function Knock({ params }: { params: { slug: string } }) {
-    return (
-        <main>
-            <h1>{params.slug}</h1>
-            <p>Hello from {params.slug}</p>
-        </main>
-    );
+export default async function Knock({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  return (
+    <main>
+      <h1>{slug}</h1>
+      <p>Hello from {slug}</p>
+    </main>
+  );
 }

@@ -6,6 +6,7 @@ type AppItem = { day: number; slug: string; title: string; desc: string }
 const APPS: AppItem[] = [
     { day: 1, slug: 'day1_sample', title: 'Knock List Sample', desc: 'Day1のサンプル（アーカイブ）' },
     { day: 2, slug: 'day2_markdown-pad', title: 'Markdown Live Preview', desc: 'Markdown入力→即時プレビュー（GFM対応）' },
+    { day: 3, slug: 'day3_todo-lite', title: 'ToDo Lite', desc: '3状態（未/進/完）とローカル永続化' },
     // 以降 Day3, Day4... を追記
 ]
 

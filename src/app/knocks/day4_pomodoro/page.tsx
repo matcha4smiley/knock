@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+
+declare global {
+    interface Window {
+        webkitAudioContext?: typeof AudioContext;
+    }
+}
 
 type Phase = 'work' | 'break';
 
@@ -15,6 +21,7 @@ export default function Page() {
     const [workMin, setWorkMin] = useState<number>(25);
     const [breakMin, setBreakMin] = useState<number>(5);
     const [autoNext, setAutoNext] = useState<boolean>(true);
+    const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
     const [longBreakMin, setLongBreakMin] = useState<number>(15);
     const [roundsPerLongBreak, setRoundsPerLongBreak] = useState<number>(4);
 
@@ -25,18 +32,120 @@ export default function Page() {
     const [rounds, setRounds] = useState<number>(0); // 作業完了数
     const [isLong, setIsLong] = useState<boolean>(false); // 休憩がロングかどうか
 
+    // サウンド用
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const audioUnlockedRef = useRef<boolean>(false);
+
+    const ensureAudioCtx = () => {
+        // ユーザー操作から
+        if(!audioCtxRef.current){
+            const Ctor = window.AudioContext ?? window.webkitAudioContext;
+            audioCtxRef.current = Ctor ? new Ctor() : null;
+        }
+
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended'){
+            audioCtxRef.current.resume().catch(() => {});
+        }
+
+        if (audioCtxRef.current?.state === 'running'){
+            audioUnlockedRef.current = true;
+        }
+    };
+
+    type BeepKind = 'work' | 'break';
+    
+    const playBeep = useCallback((kind: BeepKind, bypassEnabled = false) => {
+        if (!bypassEnabled && !soundEnabled) return;
+        const ctx = audioCtxRef.current;
+        if(!ctx || !audioUnlockedRef.current) return; //未アンロックは無音でスキップ
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        // 作業再開は 520Hz、休憩開始は 880Hz とかで耳で区別
+        osc.frequency.value = kind === 'break' ? 880 : 520;
+        gain.gain.value = 0.0001;
+        osc.connect(gain).connect(ctx.destination);
+        const t = ctx.currentTime;
+        // 立ち上げ → すぐ減衰（120ms程度の短いビープ）
+        gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+        osc.start(t);
+        osc.stop(t + 0.18);
+    }, [soundEnabled]);
+
     // 現在フェーズの総秒数
     const phaseSeconds = useMemo(
         () => (phase === 'work' ? workMin : (isLong ? longBreakMin : breakMin)) * 60,
         [phase, workMin, breakMin, longBreakMin, isLong]
     );
-
-    // 停止中に設定やフェーズが変わったら、満タン秒に合わせる
-    useEffect(() => {
-        if (!running) setRemaining(phaseSeconds);
-    }, [phase, workMin, breakMin, longBreakMin, isLong, phaseSeconds]);
     
 
+    // 停止中に設定やフェーズが変わったら、満タン秒に合わせる
+    const prevPhaseSecRef = useRef<number>(phaseSeconds);
+
+    useEffect(() => {
+        const changed = prevPhaseSecRef.current !== phaseSeconds;
+        if (!running && changed) setRemaining(phaseSeconds);
+    }, [running, phase, workMin, breakMin, longBreakMin, isLong, phaseSeconds]);
+
+    //
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
+
+    const [supportsNotification, setSupportsNotification] = useState(false);
+    const [notifEnabled, setNotifEnabled] = useState(false);
+    const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
+
+    useEffect(() => {
+        if (!mounted) return;
+        const ok = 'Notification' in window;
+        setSupportsNotification(ok);
+        if (!ok) {
+            setNotifPerm('default');
+            setNotifEnabled(false);
+            return;
+        }
+        const p = Notification.permission;
+        setNotifPerm(p);
+        setNotifEnabled(p === 'granted');
+    }, [mounted]);
+
+    // 初期化：すでに許可済みなら有効化
+    useEffect(() => {
+        if (!mounted) return;
+        const ok = 'Notification' in window;
+        setSupportsNotification(ok);
+        if (!ok) {
+            setNotifPerm('default');
+            setNotifEnabled(false);
+            return;
+        }
+        const p = Notification.permission;
+        setNotifPerm(p);
+        setNotifEnabled(p === 'granted');
+    }, [mounted]);
+
+
+    const requestNotificationPermission = async () => {
+        if (!supportsNotification) return;
+        try {
+            const p = await Notification.requestPermission();
+            setNotifPerm(p);
+            setNotifEnabled(p === 'granted');
+        } catch {
+
+        }
+    };
+
+    const fireNotification = useCallback((title: string, body: string) => {
+        if (!supportsNotification || !notifEnabled) return;
+        try {
+            new Notification(title, { body });
+        } catch {
+
+        }
+    }, [supportsNotification, notifEnabled]);
+    
     // タイマー進行 & 0到達時のフェーズ切替（0を返さず次秒数を返す）
     useEffect(() => {
         if (!running) return;
@@ -47,8 +156,7 @@ export default function Page() {
                     clearInterval(id);
 
                     const nextPhase: Phase = phase === 'work' ? 'break' : 'work';
-                    const nextSeconds =
-                        (nextPhase === 'work' ? workMin : breakMin) * 60;
+                    let nextSeconds: number;
 
                     if (phase === 'work') setRounds((r) => r + 1);
                     setPhase(nextPhase);
@@ -56,9 +164,18 @@ export default function Page() {
 
                     // 通知：フェーズ切替のお知らせ
                     if (nextPhase === 'break') {
+                        const nextRounds = rounds + 1;
+                        const willBeLong = nextRounds % Math.max(1, roundsPerLongBreak) === 0;
+                        if (phase === 'work') setRounds((r) => r + 1);
+                        setIsLong(willBeLong);
+                        nextSeconds = (willBeLong ? longBreakMin : breakMin) * 60;
                         fireNotification('休憩タイム', `おつかれさま！ ${breakMin}分 休憩しよう。`);
+                        playBeep('break');
                     } else {
+                        setIsLong(false);
+                        nextSeconds = workMin * 60;
                         fireNotification('作業再開', `集中モードに戻ろう。${workMin}分！`);
+                        playBeep('work');
                     }
 
                     return nextSeconds; // 0を経由しない
@@ -68,10 +185,11 @@ export default function Page() {
         }, 1000);
 
         return () => clearInterval(id);
-    }, [running, phase, workMin, breakMin, autoNext]);
+    }, [running, phase, workMin, breakMin, longBreakMin, roundsPerLongBreak, rounds, autoNext, fireNotification, playBeep]);
 
     // 操作
     const handleStart = () => {
+        if (soundEnabled) ensureAudioCtx(); // ユーザー操作でアンロック
         if (remaining === 0) {
             setRemaining(phaseSeconds);
         }
@@ -81,6 +199,7 @@ export default function Page() {
     const handlePause = () => setRunning(false);
 
     const handleReset = () => {
+        if (soundEnabled) ensureAudioCtx();
         setRunning(false);
         setPhase('work');
         setRounds(0);
@@ -89,6 +208,7 @@ export default function Page() {
     };
 
     const handleSkip = () => {
+        if (soundEnabled) ensureAudioCtx();
         setRunning(false);
         if (phase === 'work') {
             const nextRounds = rounds + 1;
@@ -101,52 +221,6 @@ export default function Page() {
             setPhase('work');
             setIsLong(false);
             setRemaining(workMin * 60);
-        }
-    };
-
-    const [mounted, setMounted] = useState(false);
-    useEffect(() => setMounted(true), []);
-
-    const [supportsNotification, setSupportsNotification] = useState(false);
-    const [notifEnabled, setNotifEnabled] = useState(false);
-    const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
-
-    useEffect(() => {
-        if(!mounted) return;
-        const ok = 'Notification' in window;
-        setSupportsNotification(ok);
-        if(ok){
-            const p = Notification.permission;
-            setNotifPerm(p);
-            setNotifEnabled(p === 'granted');
-        }
-    }, [mounted]);
-
-    // 初期化：すでに許可済みなら有効化
-    useEffect(() => {
-        if(supportsNotification && Notification.permission === 'granted') {
-            setNotifEnabled(true);
-            setNotifPerm('granted');
-        }
-    })
-
-    const requestNotificationPermission = async() => {
-        if(!supportsNotification) return;
-        try{
-            const p = await Notification.requestPermission();
-            setNotifPerm(p);
-            setNotifEnabled(p === 'granted');
-        } catch {
-
-        }
-    };
-
-    const fireNotification = (title: string, body: string) => {
-        if(!supportsNotification || !notifEnabled) return;
-        try {
-            new Notification(title, { body });
-        } catch {
-
         }
     };
 
@@ -308,6 +382,28 @@ export default function Page() {
                     className="px-4 py-2 rounded-xl shadow border hover:shadow-md"
                 >
                     Skip ▶
+                </button>
+            </section>
+            <section className="mt-2 flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                    <input
+                        type="checkbox"
+                        checked={soundEnabled}
+                        onChange={(e) => {
+                            setSoundEnabled(e.target.checked);
+                            if(e.target.checked) ensureAudioCtx();
+                        }}
+                    />
+                    <span className="text-sm">サウンド通知を有効にする</span>
+                </label>
+                <button 
+                    onClick={() => {
+                        ensureAudioCtx();
+                        playBeep('work', true);
+                    }}
+                    className="px-3 py-1 rounded-lg border shadow hover:shadow-md text-sm"
+                >
+                    テスト再生
                 </button>
             </section>
         </main>

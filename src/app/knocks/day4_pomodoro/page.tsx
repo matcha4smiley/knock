@@ -15,23 +15,27 @@ export default function Page() {
     const [workMin, setWorkMin] = useState<number>(25);
     const [breakMin, setBreakMin] = useState<number>(5);
     const [autoNext, setAutoNext] = useState<boolean>(true);
+    const [longBreakMin, setLongBreakMin] = useState<number>(15);
+    const [roundsPerLongBreak, setRoundsPerLongBreak] = useState<number>(4);
 
     // ランタイム状態
     const [phase, setPhase] = useState<Phase>('work');
     const [remaining, setRemaining] = useState<number>(workMin * 60);
     const [running, setRunning] = useState<boolean>(false);
     const [rounds, setRounds] = useState<number>(0); // 作業完了数
+    const [isLong, setIsLong] = useState<boolean>(false); // 休憩がロングかどうか
 
     // 現在フェーズの総秒数
     const phaseSeconds = useMemo(
-        () => (phase === 'work' ? workMin : breakMin) * 60,
-        [phase, workMin, breakMin]
+        () => (phase === 'work' ? workMin : (isLong ? longBreakMin : breakMin)) * 60,
+        [phase, workMin, breakMin, longBreakMin, isLong]
     );
 
     // 停止中に設定やフェーズが変わったら、満タン秒に合わせる
     useEffect(() => {
         if (!running) setRemaining(phaseSeconds);
-    }, [phase, workMin, breakMin, phaseSeconds]);
+    }, [phase, workMin, breakMin, longBreakMin, isLong, phaseSeconds]);
+    
 
     // タイマー進行 & 0到達時のフェーズ切替（0を返さず次秒数を返す）
     useEffect(() => {
@@ -81,30 +85,42 @@ export default function Page() {
         setPhase('work');
         setRounds(0);
         setRemaining(workMin * 60);
+        setIsLong(false);
     };
 
     const handleSkip = () => {
         setRunning(false);
         if (phase === 'work') {
+            const nextRounds = rounds + 1;
+            const willBeLong = nextRounds % Math.max(1, roundsPerLongBreak) === 0;
+            setRounds((r) => r+1);
             setPhase('break');
-            setRemaining(breakMin * 60);
+            setIsLong(willBeLong);
+            setRemaining((willBeLong? longBreakMin : breakMin) * 60);
         } else {
             setPhase('work');
+            setIsLong(false);
             setRemaining(workMin * 60);
         }
     };
 
-    // 通知サポート判定
-    const supportsNotification = 
-        typeof window !== 'undefined' && 'Notification' in window;
-    
-    // 通知の利用ON/OFF（ユーザ設定ではなく「使えるか」のフラグ）
-    const [notifEnabled, setNotifEnabled] = useState<boolean>(false);
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
 
-    // 現在の権限（'default' | 'granted' | 'denied'）
-    const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
-        supportsNotification ? Notification.permission : 'default'
-    );
+    const [supportsNotification, setSupportsNotification] = useState(false);
+    const [notifEnabled, setNotifEnabled] = useState(false);
+    const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
+
+    useEffect(() => {
+        if(!mounted) return;
+        const ok = 'Notification' in window;
+        setSupportsNotification(ok);
+        if(ok){
+            const p = Notification.permission;
+            setNotifPerm(p);
+            setNotifEnabled(p === 'granted');
+        }
+    }, [mounted]);
 
     // 初期化：すでに許可済みなら有効化
     useEffect(() => {
@@ -161,7 +177,9 @@ export default function Page() {
             <section className="mt-2">
                 <div className="text-sm text-gray-600 flex items-center gap-3">
                     <span>通知：</span>
-                    {supportsNotification ? (
+                        {!mounted ? (
+                        <span className="text-gray-500">判定中...</span>
+                        ): supportsNotification ? (
                         notifPerm === 'granted' ? (
                             <span className="text-green-600">許可済み</span>
                         ) : notifPerm === 'denied' ? (
@@ -209,6 +227,31 @@ export default function Page() {
                         }
                     />
                 </label>
+                <label className="flex flex-col gap-1">
+                    <span className="text-sm text-gray-600">ロング休憩（分）</span>
+                    <input
+                        type="number"
+                        min={1}
+                        className="border rounded-xl px-3 py-2"
+                        value={longBreakMin}
+                        disabled={running}
+                        onChange={(e) => 
+                            setLongBreakMin(Math.max(1, Number(e.target.value)))
+                        }
+                    />
+                </label>
+                <label className="flex flex-col gap-1">
+                    <span className="text-sm text-gray-600">ロング間隔（作業回数）</span>
+                    <input
+                        type="number"
+                        min={1}
+                        className="border rounded-xl px-3 py-2"
+                        disabled={running}
+                        onChange={(e) =>
+                            setRoundsPerLongBreak(Math.max(1, Number(e.target.value)))
+                        }
+                    />
+                </label>
                 <label className="col-span-2 flex items-center gap-2">
                     <input
                         type="checkbox"
@@ -222,7 +265,13 @@ export default function Page() {
             {/* 表示 */}
             <section className="text-center space-y-2 mt-6">
                 <div className="text-sm text-gray-500">
-                    現在のフェーズ：<b>{phase === 'work' ? '作業' : '休憩'}</b>
+                    現在のフェーズ：
+                    <b>
+                        {phase === 'work' 
+                            ? '作業' 
+                            : `休憩${isLong ? '(ロング)' : '(ショート)'}`
+                        }
+                    </b>
                     <span className="ml-3">
                         作業完了数：<b>{rounds}</b>
                     </span>

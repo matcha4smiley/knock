@@ -8,6 +8,7 @@ const APPS: AppItem[] = [
     { day: 2, slug: 'day2_markdown-pad', title: 'Markdown Live Preview', desc: 'Markdown入力→即時プレビュー（GFM対応）' },
     { day: 3, slug: 'day3_todo-lite', title: 'ToDo Lite', desc: '3状態（未/進/完）とローカル永続化' },
     { day: 4, slug: 'day4_pomodoro', title: 'Pomodoro Timer', desc: '開始/停止/リセット・基本カウントダウン' },
+    { day: 5, slug: 'day5_calculator', title: 'Calculator', desc: '電卓'},
 ]
 
 export default function KnocksCatalogPage() {

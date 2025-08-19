@@ -31,6 +31,7 @@ export default function Page(){
             >
                 ☰
                 <span className="sr-only">{open ? "Close menu" : "Open menu"}</span>
+
             </button>
             {/* モバイルメニュー（md未満で表示、openのときだけ描画） */}
             <div
@@ -51,4 +52,5 @@ export default function Page(){
             </div>
         </header>
     );
+
 }

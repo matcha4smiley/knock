@@ -25,7 +25,7 @@ export default function Page(){
     }, [input]);
 
     
-    type Token = { type: 'num' | 'op'; value: string };
+    type Token = { type: 'num' | 'op' | 'lparen' | 'rparen'; value: string };
 
     const precedence: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2 };
     const isOp = (c: string): c is '+' | '-' | '*' | '/' => ['+', '-', '*', '/'].includes(c);
@@ -37,25 +37,20 @@ export default function Page(){
             <div className="border rounded p-2 w-64 text-right">{input || '0'}</div>
 
             <div className="grid grid-cols-4 gap-2 w-64">
-                {['7', '8', '9', '/', '4', '5', '6', '*', '1', '2', '3', '-', '0', '.', '=', '+'].map(symbol => (
+                {['(', ')', '/', 'C', '7', '8', '9', '*', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '='].map(symbol => (
                     <button
                         key={symbol}
-                        onClick={() =>
-                            symbol === '=' ? handleEqual() : handleClick(symbol)
-                        }
+                        onClick={() =>{
+                            if (symbol === '=') return handleEqual();
+                            if (symbol === 'C') return handleClear();
+                            if (symbol.trim() === '') return; // 空白プレースホルダ
+                            return handleClick(symbol);
+                        }}
                         className="border rounded p-4 hover:bg-gray-100"
                     >
                         {symbol}
                     </button>
                 ))}
-                <button
-                    className="col-span-4 border rounded p-2 hover:bg-gray-100"
-                    onClick={() =>
-                        handleClear()
-                    }
-                >
-                    C
-                </button>
             </div>
             <div className="w-64 border-t mt-4 pt-2">
                 <h3 className="font-bold">History</h3>
@@ -72,19 +67,54 @@ export default function Page(){
     function tokenize(expr: string): Token[] {
         const tokens: Token[] = [];
         let buf = '';
+        let prevType: Token['type'] | null = null;
 
         for (let i = 0; i < expr.length; i++) {
             const c = expr[i];
-            if (/\d.|\./.test(c)) {
+            if (/\d|\./.test(c)) {
                 buf += c;
                 continue;
             }
 
             if (isOp(c)) {
-                if (buf.length === 0) throw new Error('Invalid expression');
-                tokens.push({ type: 'num', value: buf });
-                buf = '';
+                const next = expr[i + 1];
+                const canBeUnary = c === '-' && (prevType === null || prevType === 'op' || prevType === 'lparen');
+                if (canBeUnary && next && (/[\d\.]/.test(next))) {
+                    buf += c;
+                    continue;
+                }
+
+                if (buf.length > 0) {
+                    tokens.push({ type: 'num', value: buf });
+                    buf = '';
+                    prevType = 'num';
+                } else if (prevType !== 'rparen'){
+                    throw new Error('Invalid expression');
+                }
                 tokens.push({ type: 'op', value: c });
+                prevType = 'op';
+                continue;
+            }
+
+            if (c === '(') {
+                if (buf.length) {
+                    tokens.push({ type: 'num', value: buf });
+                    buf = '';
+                    prevType = 'num';
+                }
+                tokens.push({ type: 'lparen', value: c });
+                prevType = 'lparen';
+                continue;
+            }
+
+            if (c === ')') {
+                if (buf.length) { 
+                    tokens.push({ type: 'num', value: buf });
+                    buf = '';
+                    prevType = 'num';
+                }
+                tokens.push({ type: 'rparen', value: c });
+                prevType = 'rparen';
                 continue;
             }
 
@@ -92,7 +122,10 @@ export default function Page(){
             throw new Error('Unsupported char');
         }
 
-        if (buf.length) tokens.push({ type: 'num', value: buf });
+        if (buf.length) {
+            tokens.push({ type: 'num', value: buf });
+            prevType = 'num';
+        }
         return tokens;
     }
 
@@ -103,7 +136,7 @@ export default function Page(){
         for (const t of tokens) {
             if (t.type === 'num') {
                 out.push(t);
-            } else {
+            } else if (t.type === 'op') {
                 while (
                     ops.length &&
                     ops[ops.length - 1].type === 'op' &&
@@ -112,9 +145,21 @@ export default function Page(){
                     out.push(ops.pop() as Token);
                 }
                 ops.push(t);
+            } else if (t.type === 'lparen') {
+                ops.push(t);
+            } else if (t.type === 'rparen') {
+                while (ops.length && ops[ops.length - 1].type !== 'lparen') {
+                    out.push(ops.pop() as Token);
+                }
+                if (!ops.length) throw new Error('Mismatched parentheses');
+                ops.pop();
             }
         }
-        while (ops.length) out.push(ops.pop() as Token);
+        while (ops.length) {
+            const t = ops.pop() as Token;
+            if (t.type === 'lparen' || t.type === 'rparen') throw new Error('Mismatched parentheses');
+            out.push(t);
+        }
         return out;
     }
 
@@ -125,11 +170,11 @@ export default function Page(){
                 const n = Number(t.value);
                 if (Number.isNaN(n)) throw new Error('NaN');
                 st.push(n);
-            } else {
+            } else if(t.type === 'op') {
                 const b = st.pop();
                 const a = st.pop();
 
-                if (a === undefined || b === undefined) throw new Error('Stack Underflew');
+                if (a === undefined || b === undefined) throw new Error('Stack Underflow');
                 switch (t.value) {
                     case '+': st.push(a + b); break;
                     case '-': st.push(a - b); break;

@@ -31,6 +31,7 @@ export default function Page(){
             >
                 ☰
                 <span className="sr-only">{open ? "Close menu" : "Open menu"}</span>
+
             </button>
             {/* モバイルメニュー（md未満で表示、openのときだけ描画） */}
             <div
@@ -51,4 +52,93 @@ export default function Page(){
             </div>
         </header>
     );
+
+    //計算ロジック
+    type Token = { type: 'num' | 'op'; value: string };
+
+    const precedence: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2 };
+    const isOp = (c: string): c is '+' | '-' | '*' | '/' => ['+', '-', '*', '/'].includes(c);
+
+    function tokenize(expr: string): Token[] {
+        const tokens: Token[] = [];
+        let buf = '';
+
+        for(let i = 0; i < expr.length; i++){
+            const c = expr[i];
+            if(/\d.|\./.test(c)){
+                buf += c;
+                continue;
+            }
+
+            if(isOp(c)){
+                if(buf.length === 0) throw new Error('Invalid expression');
+                tokens.push({ type: 'num', value: buf});
+                buf = '';
+                tokens.push({ type: 'op', value: c});
+                continue;
+            }
+
+            if(c === ' ') continue;
+            throw new Error('Unsupported char');
+        }
+
+        if(buf.length) tokens.push({ type: 'num', value: buf});
+        return tokens;
+    }
+
+    function toRPN(tokens: Token[]): Token[] {
+        const out: Token[] = [];
+        const ops: Token[] = [];
+
+        for(const t of tokens){
+            if(t.type === 'num'){
+                out.push(t);
+            } else {
+                while(
+                    ops.length &&
+                    ops[ops.length - 1].type === 'op' &&
+                    precedence[ops[ops.length - 1].value] >= precedence[t.value]
+                ){
+                    out.push(ops.pop() as Token);
+                }
+                ops.push(t);
+            }
+        }
+        while(ops.length) out.push(ops.pop() as Token);
+        return out;
+    }
+
+    function evalRPN(tokens: Token[]): number {
+        const st: number[] = [];
+        for(const t of tokens){
+            if(t.type === 'num'){
+                const n = Number(t.value);
+                if(Number.isNaN(n)) throw new Error('NaN');
+                st.push(n);
+            } else {
+                const b = st.pop();
+                const a = st.pop();
+
+                if(a === undefined || b === undefined) throw new Error('Stack Underflew');
+                switch(t.value){
+                    case '+': st.push(a+b); break;
+                    case '-': st.push(a-b); break;
+                    case '*': st.push(a*b); break;
+                    case '/': st.push(b === 0 ? NaN : a/b); break;
+                }
+            }
+        }
+        if(st.length !== 1) throw new Error('Invalid RPN');
+        return st[0];
+    }
+
+    function safeEvaluate(input: string): number {
+        const tokens = tokenize(input);
+        const rpn = toRPN(tokens);
+        const result = evalRPN(rpn);
+
+        if(!Number.isFinite(result)) throw new Error('Invalid result');
+
+        return result;
+    }
 }

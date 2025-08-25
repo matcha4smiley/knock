@@ -9,6 +9,7 @@ const APPS: AppItem[] = [
     { day: 3, slug: 'day3_todo-lite', title: 'ToDo Lite', desc: '3状態（未/進/完）とローカル永続化' },
     { day: 4, slug: 'day4_pomodoro', title: 'Pomodoro Timer', desc: '開始/停止/リセット・カウントダウン' },
     { day: 5, slug: 'day5_calculator', title: 'Calculator', desc: '四則演算・履歴・括弧（安全評価）' },
+    { day: 6, slug: 'day6_unit-converter', title: 'Unit Converter', desc: '単位変換' },
 ]
 
 export default function KnocksCatalogPage() {

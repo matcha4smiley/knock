@@ -60,7 +60,7 @@ export default function Page(){
     };
 
     return (
-        <main className="p-8">
+        <div className="flex flex-col items-center gap-4 p-6">
             <h1 className="text-xl font-bold mb-6">単位換算（タブ切替）</h1>
 
             {/* Tabs */}
@@ -159,6 +159,6 @@ export default function Page(){
                     </label>
                 </div>
             </section>
-        </main>
+        </div>
     );
 }
